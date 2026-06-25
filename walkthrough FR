@@ -1,0 +1,36 @@
+# Native Android App Conversion Walkthrough
+
+Your React web app has been successfully transformed into a native Android app architecture using **Capacitor**! 
+
+Here is what was accomplished:
+- Installed Capacitor core libraries in your React project.
+- Initialized the configuration (`capacitor.config.json`) with the bundle ID `com.appterra.fundraiser`.
+- Built the production-ready React web code into the `dist` folder.
+- Generated a native `android` folder right inside your project directory.
+- Synced the web assets into the Android native wrapper.
+
+## Next Steps: Compiling the APK
+
+Your project now contains a folder named `android` which is a complete, native Android Studio project.
+
+> [!IMPORTANT]
+> Any time you make changes to your React app in the future (like editing `App.jsx`), you need to run two commands to push those changes to the Android app:
+> 1. `npm run build`
+> 2. `npx cap sync`
+
+### Open in Android Studio
+
+To open the project in Android Studio and compile it into an app you can install on your phone, open your terminal (inside the `Fundraiser` folder) and run:
+
+```bash
+npx cap open android
+```
+
+Alternatively, you can manually open **Android Studio**, click "Open", and select the `android` folder located inside `c:\Users\Anees Ahad\Desktop\Desktop PVT\Fundraiser\`.
+
+### Building the APK
+Once Android Studio opens the project and finishes syncing (this might take a few minutes as it downloads Gradle dependencies):
+1. Wait for the indexing and Gradle sync to finish completely.
+2. In the top menu, click **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
+3. Once it finishes, a small pop-up will appear in the bottom right corner with a "locate" link. 
+4. Click that link, and you will find your `app-debug.apk` file ready to be transferred to your phone and installed!
