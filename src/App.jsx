@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from "react-router-dom";
-import { Check, Plus, Heart, FolderPlus, Printer, Menu, X } from "lucide-react";
+import { HashRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from "react-router-dom";
+import { Check, Plus, Heart, FolderPlus, Printer, Menu, X, User, Lock, Globe, LogOut, Users } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
+import { Capacitor } from '@capacitor/core';
+import { Printer as CapPrinter } from '@capgo/capacitor-printer';
 
 const supabaseUrl = "https://iqkehtzsakanwqhqdjhq.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlxa2VodHpzYWthbndxaHFkamhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNzYwODcsImV4cCI6MjA5Nzk1MjA4N30.6DdxAgfSqnwgm7ehR7coZrdiB2Sil_jLH5oXINeHgGY";
@@ -170,6 +172,69 @@ const FONTS = `
 }
 `;
 
+function Auth({ onSuccess }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLogin, setIsLogin] = useState(true);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    if (isLogin) {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+      else onSuccess && onSuccess();
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setError(error.message);
+      else {
+        setError('Success! You are now logged in.');
+        onSuccess && onSuccess();
+      }
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 360, margin: '60px auto', background: '#1E332C', padding: 24, borderRadius: 16, border: '1px solid #2A3B33' }}>
+      <h2 style={{ fontFamily: 'Fraunces', fontSize: 24, color: '#F4F1E8', marginBottom: 20, textAlign: 'center' }}>
+        {isLogin ? 'Welcome Back' : 'Create Account'}
+      </h2>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <input 
+          type="email" 
+          placeholder="Email address" 
+          value={email} 
+          onChange={e => setEmail(e.target.value)}
+          required
+          style={{ padding: 12, borderRadius: 8, background: '#121E1A', border: '1px solid #2A3B33', color: '#F4F1E8', outline: 'none' }}
+        />
+        <input 
+          type="password" 
+          placeholder="Password" 
+          value={password} 
+          onChange={e => setPassword(e.target.value)}
+          required
+          style={{ padding: 12, borderRadius: 8, background: '#121E1A', border: '1px solid #2A3B33', color: '#F4F1E8', outline: 'none' }}
+        />
+        {error && <div style={{ color: '#E8714A', fontSize: 13 }}>{error}</div>}
+        <button 
+          type="submit"
+          style={{ background: '#D4A24C', color: '#16241F', padding: 12, borderRadius: 8, border: 'none', fontWeight: 600, cursor: 'pointer', marginTop: 8 }}
+        >
+          {isLogin ? 'Log In' : 'Sign Up'}
+        </button>
+      </form>
+      <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: '#9CAFA5' }}>
+        {isLogin ? "Don't have an account? " : "Already have an account? "}
+        <span style={{ color: '#D4A24C', cursor: 'pointer', fontWeight: 600 }} onClick={() => setIsLogin(!isLogin)}>
+          {isLogin ? 'Sign up' : 'Log in'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function GrowthRing({ percent, label, sub, size = 220 }) {
   const r = 88;
   const c = 2 * Math.PI * r;
@@ -212,7 +277,7 @@ function GrowthRing({ percent, label, sub, size = 220 }) {
   );
 }
 
-function FundraiserDashboard({ rates }) {
+function FundraiserDashboard({ rates, session }) {
   const { id } = useParams();
   const [fundraiser, setFundraiser] = useState(null);
   const [contributions, setContributions] = useState([]);
@@ -221,12 +286,50 @@ function FundraiserDashboard({ rates }) {
   const [form, setForm] = useState({ name: "", amount: "", currency: "INR" });
   const [error, setError] = useState("");
   const [notesError, setNotesError] = useState("");
+  const [newNote, setNewNote] = useState("");
+
+  const isOwner = session?.user?.id === fundraiser?.owner_id;
+  const [inviteEmail, setInviteEmail] = useState("");
+
+  const handlePrint = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await CapPrinter.printWebView();
+      } catch (e) {
+        console.error("Print failed", e);
+        window.print();
+      }
+    } else {
+      window.print();
+    }
+  };
+
+  async function togglePrivacy() {
+    if (!isOwner) return;
+    updateFundraiser({ is_private: !fundraiser.is_private });
+  }
+
+  async function handleInvite(e) {
+    e.preventDefault();
+    if (!inviteEmail.trim() || !isOwner) return;
+    const updatedInvites = [...(fundraiser.invited_emails || []), inviteEmail.trim()];
+    updateFundraiser({ invited_emails: updatedInvites });
+    setInviteEmail("");
+  }
 
   useEffect(() => {
     async function loadData() {
       // Fetch fundraiser details
       const { data: fData } = await supabase.from("fundraisers").select("*").eq("id", id).single();
       if (fData) {
+        if (fData.is_private) {
+          const isFDataOwner = session?.user?.id === fData.owner_id;
+          const isInvited = fData.invited_emails?.includes(session?.user?.email);
+          if (!isFDataOwner && !isInvited) {
+            setFundraiser({ accessDenied: true });
+            return;
+          }
+        }
         setFundraiser(fData);
         setForm(f => ({ ...f, currency: fData.currency }));
       }
@@ -262,6 +365,23 @@ function FundraiserDashboard({ rates }) {
       }
     } else {
       if (updates.notes !== undefined) setNotesError("");
+    }
+  }
+
+  async function addNote() {
+    if (!newNote.trim()) return;
+    const stamp = new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const formattedNote = `[${stamp}] ${newNote.trim()}`;
+    const updatedNotes = fundraiser.notes ? `${formattedNote}\n\n${fundraiser.notes}` : formattedNote;
+    
+    setFundraiser((prev) => ({ ...prev, notes: updatedNotes }));
+    setNewNote("");
+    
+    const { error } = await supabase.from("fundraisers").update({ notes: updatedNotes }).eq("id", id);
+    if (error) {
+      setNotesError("Please run the SQL command to add the 'notes' column to your database first!");
+    } else {
+      setNotesError("");
     }
   }
 
@@ -305,6 +425,16 @@ function FundraiserDashboard({ rates }) {
   }
 
   if (!fundraiser) return <div style={{ padding: 40, color: '#9CAFA5' }}>Loading dashboard...</div>;
+  if (fundraiser.accessDenied) {
+    return (
+      <div style={{ textAlign: 'center', padding: '100px 20px', color: '#9CAFA5' }}>
+        <Lock size={48} color="#2A3B33" style={{ margin: '0 auto 24px' }} />
+        <h2 style={{ color: '#F4F1E8', fontFamily: 'Fraunces', fontSize: 24, marginBottom: 12 }}>Private Campaign</h2>
+        <p>You do not have permission to view this campaign. Please log in or ask for an invite.</p>
+        {!session && <Auth />}
+      </div>
+    );
+  }
 
   const currency = fundraiser.currency;
   const symbol = SYMBOLS[currency];
@@ -319,6 +449,51 @@ function FundraiserDashboard({ rates }) {
   return (
     <div className="print-area main-content" style={{ maxWidth: 480, margin: "0 auto", paddingBottom: 64 }}>
       {/* Header */}
+      {isOwner && (
+        <div className="no-print" style={{ background: '#1E332C', border: '1px solid #2A3B33', borderRadius: 12, padding: 16, marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: fundraiser.is_private ? 16 : 0 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#F4F1E8', fontWeight: 600, fontSize: 14 }}>
+                {fundraiser.is_private ? <Lock size={16} color="#D4A24C" /> : <Globe size={16} color="#7CB396" />}
+                {fundraiser.is_private ? 'Private Campaign' : 'Public Campaign'}
+              </div>
+              <div style={{ fontSize: 12, color: '#9CAFA5', marginTop: 4 }}>
+                {fundraiser.is_private ? 'Only you and invited users can see this.' : 'Anyone with the link can see this.'}
+              </div>
+            </div>
+            <button 
+              onClick={togglePrivacy}
+              style={{ background: 'transparent', border: '1px solid #D4A24C', color: '#D4A24C', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+            >
+              Make {fundraiser.is_private ? 'Public' : 'Private'}
+            </button>
+          </div>
+          
+          {fundraiser.is_private && (
+            <div style={{ borderTop: '1px solid #2A3B33', paddingTop: 16 }}>
+              <div style={{ fontSize: 13, color: '#F4F1E8', marginBottom: 8, fontWeight: 500 }}>Invited Users:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                {fundraiser.invited_emails?.length > 0 ? fundraiser.invited_emails.map(email => (
+                  <span key={email} style={{ background: '#121E1A', padding: '4px 8px', borderRadius: 4, fontSize: 12, color: '#9CAFA5' }}>{email}</span>
+                )) : <span style={{ fontSize: 12, color: '#6E8278' }}>No one invited yet.</span>}
+              </div>
+              <form onSubmit={handleInvite} style={{ display: 'flex', gap: 8 }}>
+                <input 
+                  type="email" 
+                  placeholder="Invite by email..." 
+                  value={inviteEmail}
+                  onChange={e => setInviteEmail(e.target.value)}
+                  style={{ flex: 1, background: '#121E1A', border: '1px solid #2A3B33', borderRadius: 6, padding: '8px 12px', color: '#F4F1E8', fontSize: 13, outline: 'none' }}
+                />
+                <button type="submit" disabled={!inviteEmail.trim()} style={{ background: inviteEmail.trim() ? '#D4A24C' : '#2A3B33', color: '#16241F', border: 'none', borderRadius: 6, padding: '0 16px', fontWeight: 600, cursor: inviteEmail.trim() ? 'pointer' : 'default' }}>
+                  Invite
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Heart size={16} color="#E8714A" fill="#E8714A" />
@@ -328,7 +503,7 @@ function FundraiserDashboard({ rates }) {
         </div>
         <button 
           className="no-print"
-          onClick={() => window.print()}
+          onClick={handlePrint}
           style={{ background: "transparent", border: "1px solid #2A3B33", color: "#9CAFA5", borderRadius: 8, padding: "6px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 500, transition: "background 0.2s" }}
           onMouseOver={(e) => e.currentTarget.style.background = "#1E332C"}
           onMouseOut={(e) => e.currentTarget.style.background = "transparent"}
@@ -423,6 +598,7 @@ function FundraiserDashboard({ rates }) {
             />
           ) : (
             <span
+              onClick={() => setEditingGoal(true)}
               style={{ fontSize: 13, color: "#D4A24C", cursor: "pointer", fontWeight: 600 }}
               title="Click to edit goal"
             >
@@ -538,21 +714,58 @@ function FundraiserDashboard({ rates }) {
           Campaign Notes
         </div>
         {notesError && <div className="no-print" style={{ color: "#E8714A", fontSize: 12, marginBottom: 8 }}>{notesError}</div>}
+        <div className="no-print" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <textarea
+            placeholder="Type a new note here..."
+            value={newNote}
+            onChange={(e) => setNewNote(e.target.value)}
+            style={{
+              flex: 1,
+              background: "#1E332C",
+              border: "1px solid #2A3B33",
+              borderRadius: 8,
+              padding: "10px",
+              color: "#F4F1E8",
+              fontSize: 13,
+              lineHeight: 1.4,
+              outline: "none",
+              fontFamily: "Inter",
+              resize: "vertical",
+              minHeight: 60
+            }}
+          />
+          <button
+            onClick={addNote}
+            disabled={!newNote.trim()}
+            style={{
+              background: newNote.trim() ? "#D4A24C" : "#2A3B33",
+              color: newNote.trim() ? "#16241F" : "#6E8278",
+              border: "none",
+              borderRadius: 8,
+              padding: "0 16px",
+              fontWeight: 600,
+              cursor: newNote.trim() ? "pointer" : "default",
+              transition: "0.2s"
+            }}
+          >
+            Add Note
+          </button>
+        </div>
         <textarea
           className="print-card print-text-main"
-          placeholder="Add any notes, reminders, or details about this campaign here..."
+          placeholder="No notes yet..."
           value={fundraiser.notes || ""}
           onChange={(e) => setFundraiser({ ...fundraiser, notes: e.target.value })}
           onBlur={(e) => updateFundraiser({ notes: fundraiser.notes })}
           style={{
             width: "100%",
             minHeight: 120,
-            background: "#1E332C",
+            background: "rgba(30, 51, 44, 0.5)",
             border: "1px solid #2A3B33",
             borderRadius: 12,
             padding: "14px",
-            color: "#F4F1E8",
-            fontSize: 14,
+            color: "#9CAFA5",
+            fontSize: 13,
             lineHeight: 1.5,
             outline: "none",
             fontFamily: "Inter",
@@ -570,7 +783,7 @@ function FundraiserDashboard({ rates }) {
   );
 }
 
-function Sidebar({ fundraisers, onAddFundraiser, onClose }) {
+function Sidebar({ fundraisers, onAddFundraiser, onClose, session }) {
   const location = useLocation();
 
   return (
@@ -616,6 +829,10 @@ function Sidebar({ fundraisers, onAddFundraiser, onClose }) {
 
         <button 
           onClick={() => {
+            if (!session) {
+              alert("Please log in to create a campaign.");
+              return;
+            }
             onAddFundraiser();
             onClose();
           }} 
@@ -623,6 +840,19 @@ function Sidebar({ fundraisers, onAddFundraiser, onClose }) {
         >
           <FolderPlus size={16} /> New Fundraiser
         </button>
+
+        <div style={{ marginTop: 16, borderTop: '1px solid #2A3B33', paddingTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {session ? (
+            <>
+              <div style={{ fontSize: 12, color: '#9CAFA5', overflow: 'hidden', textOverflow: 'ellipsis' }}>{session.user.email}</div>
+              <button onClick={() => supabase.auth.signOut()} style={{ background: 'transparent', border: 'none', color: '#E8714A', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}><LogOut size={14} /> Logout</button>
+            </>
+          ) : (
+            <Link to="/login" onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#D4A24C', textDecoration: 'none', fontSize: 14, fontWeight: 600, width: '100%', justifyContent: 'center' }}>
+              <User size={16} /> Log in or Sign up
+            </Link>
+          )}
+        </div>
       </div>
     </>
   );
@@ -632,17 +862,33 @@ function MainApp() {
   const [rates, setRates] = useState(null);
   const [fundraisers, setFundraisers] = useState([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [session, setSession] = useState(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     fetch("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json")
       .then((res) => res.json())
       .then((data) => setRates(data.usd))
       .catch((err) => console.error("Failed to load rates", err));
+  }, []);
 
+  useEffect(() => {
     async function loadFundraisers() {
       const { data } = await supabase.from("fundraisers").select("*").order("created_at", { ascending: false });
-      if (data) setFundraisers(data);
+      if (data) {
+        const visible = data.filter(f => 
+          !f.is_private || 
+          f.owner_id === session?.user?.id || 
+          f.invited_emails?.includes(session?.user?.email)
+        );
+        setFundraisers(visible);
+      }
     }
     loadFundraisers();
 
@@ -653,13 +899,19 @@ function MainApp() {
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, []);
+  }, [session]);
 
   async function handleAddFundraiser() {
+    if (!session) {
+      alert("Please log in to create a campaign.");
+      return;
+    }
     const { data } = await supabase.from("fundraisers").insert([{
       title: 'New Fundraiser',
       goal: 5000,
-      currency: 'INR'
+      currency: 'INR',
+      owner_id: session.user.id,
+      is_private: false
     }]).select();
 
     if (data && data.length > 0) {
@@ -685,7 +937,7 @@ function MainApp() {
       
       {/* Sidebar Drawer */}
       <div className={`no-print sidebar-drawer ${isDrawerOpen ? 'open' : ''}`}>
-        <Sidebar fundraisers={fundraisers} onAddFundraiser={handleAddFundraiser} onClose={() => setIsDrawerOpen(false)} />
+        <Sidebar fundraisers={fundraisers} onAddFundraiser={handleAddFundraiser} onClose={() => setIsDrawerOpen(false)} session={session} />
       </div>
       
       <div className="scroll-container main-content" style={{ flex: 1, padding: "20px 16px 0px", overflowY: 'auto', width: '100%' }}>
@@ -713,13 +965,29 @@ function MainApp() {
 
         <Routes>
           <Route path="/" element={
-            <div style={{ maxWidth: 480, margin: '0 auto', textAlign: 'center', padding: '100px 20px', color: '#9CAFA5' }}>
-              <Heart size={48} color="#2A3B33" style={{ margin: '0 auto 24px' }} />
-              <h2 className="print-text-main header-title" style={{ color: '#F4F1E8', fontFamily: 'Fraunces', fontSize: 24, marginBottom: 12 }}>Welcome to your Dashboard</h2>
-              <p style={{ lineHeight: 1.6 }}>Click the menu button above to select a fundraiser or create a new one.</p>
+            <div style={{ maxWidth: 600, margin: '0 auto', padding: '40px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+                <h2 style={{ color: '#F4F1E8', fontFamily: 'Fraunces', fontSize: 28, margin: 0 }}>Public Campaigns</h2>
+                {!session && <Link to="/login" style={{ color: '#D4A24C', textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>Log In / Sign Up</Link>}
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {fundraisers.filter(f => !f.is_private).length === 0 && (
+                  <div style={{ textAlign: 'center', color: '#6E8278', padding: 40 }}>No public campaigns found.</div>
+                )}
+                {fundraisers.filter(f => !f.is_private).map(f => (
+                  <Link key={f.id} to={`/fundraiser/${f.id}`} style={{ display: 'block', textDecoration: 'none', background: '#1E332C', border: '1px solid #2A3B33', borderRadius: 16, padding: 20, transition: 'transform 0.2s' }} onMouseOver={e => e.currentTarget.style.transform='translateY(-2px)'} onMouseOut={e => e.currentTarget.style.transform='none'}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <h3 style={{ margin: 0, color: '#F4F1E8', fontSize: 18, fontFamily: 'Fraunces' }}>{f.title}</h3>
+                      <span style={{ color: '#D4A24C', fontSize: 14, fontWeight: 600 }}>{f.currency} {f.goal.toLocaleString()} goal</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
             </div>
           } />
-          <Route path="/fundraiser/:id" element={<FundraiserDashboard rates={rates} />} />
+          <Route path="/login" element={<Auth onSuccess={() => navigate('/')} />} />
+          <Route path="/fundraiser/:id" element={<FundraiserDashboard rates={rates} session={session} />} />
         </Routes>
       </div>
     </div>
@@ -728,8 +996,8 @@ function MainApp() {
 
 export default function FundraiserApp() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <MainApp />
-    </BrowserRouter>
+    </HashRouter>
   );
 }
